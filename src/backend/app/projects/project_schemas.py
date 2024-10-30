@@ -576,3 +576,12 @@ class PresignedUrlRequest(BaseModel):
     task_id: uuid.UUID
     image_name: List[str]
     expiry: int  # Expiry time in hours
+
+
+class OrthophotoMetadata(BaseModel):
+    title: str
+    provider: Optional[str] = "Drone Provider"
+    platform: Optional[str] = "drone"
+    sensor: Optional[str] = "RGB"
+    description: Optional[str] = "Uploaded drone imagery"
+    tags: Optional[list[str]] = ["drone", "aerial", "RGB"]
