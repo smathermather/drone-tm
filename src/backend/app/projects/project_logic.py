@@ -1,5 +1,7 @@
 import json
+import os
 import uuid
+from app.projects.openaerialmap import OpenAerialMapUploader
 from loguru import logger as log
 from fastapi import HTTPException, UploadFile
 from app.tasks.task_splitter import split_by_square
@@ -11,6 +13,7 @@ from shapely.geometry import shape
 from io import BytesIO
 from app.s3 import (
     add_obj_to_bucket,
+    get_file_from_bucket,
     list_objects_from_bucket,
     get_presigned_url,
     get_object_metadata,
@@ -209,6 +212,7 @@ def process_drone_images(
     options = [
         {"name": "dsm", "value": True},
         {"name": "orthophoto-resolution", "value": 5},
+        {"name": "cog", "value": True},
     ]
 
     webhook_url = f"{settings.BACKEND_URL}/api/projects/odm/webhook/{user_id}/{project_id}/{task_id}/"
@@ -268,3 +272,53 @@ def get_project_info_from_s3(project_id: uuid.UUID, task_id: uuid.UUID):
     except Exception as e:
         log.exception(f"An error occurred while retrieving assets info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def upload_image_to_oam_in_background(
+    project_name: str, project_id: uuid.UUID, task_id: uuid.UUID
+):
+    """
+    Background task to handle the image upload to Open Aerial Map.
+    """
+    try:
+        # Get the COG path from MinIO using the project and task ID.
+        bucket_name = "dtm-data"
+        s3_path = f"projects/{project_id}/{task_id}/orthophoto/odm_orthophoto.tif"
+
+        # Local path to temporarily save the downloaded image
+        local_image_path = f"/tmp/{task_id}_orthophoto.tif"
+
+        # Use the existing function to download the file from the MinIO bucket
+        get_file_from_bucket(bucket_name, s3_path, local_image_path)
+        log.info(f"Downloaded {s3_path} to {local_image_path}")
+
+        # Verify if we have a valid OAM API token
+        api_token = settings.OAM_API_TOKEN
+        if not api_token:
+            raise Exception("No OAM API token found")
+
+        uploader = OpenAerialMapUploader(api_token=api_token)
+
+        image_metadata = uploader.create_metadata(local_image_path, project_name)
+
+        response = uploader.upload_image(local_image_path, image_metadata)
+
+        if response.status_code == 201:
+            log.info(f"Image uploaded successfully: {response.json()['url']}")
+        else:
+            log.error(
+                f"Failed to upload image: {response.status_code} - {response.text}"
+            )
+
+    except Exception as e:
+        log.error(f"Failed to upload orthophoto in background: {str(e)}")
+
+    finally:
+        if os.path.exists(local_image_path):
+            try:
+                os.remove(local_image_path)
+                log.info(f"Temporary directory {local_image_path} cleaned up.")
+            except Exception as cleanup_error:
+                log.error(
+                    f"Error cleaning up temporary directory {local_image_path}: {cleanup_error}"
+                )

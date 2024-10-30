@@ -109,6 +109,8 @@ class Settings(BaseSettings):
 
     NODE_ODM_URL: Optional[str] = "http://odm-api:3000"
 
+    OAM_API_TOKEN: Optional[str] = None
+
     @computed_field
     @property
     def emails_enabled(self) -> bool:

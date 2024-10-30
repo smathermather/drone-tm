@@ -4,7 +4,6 @@ import uuid
 from typing import Annotated, Optional
 from uuid import UUID
 from app.tasks import task_logic
-from backend.app.projects.oam import OpenAerialMapUploader
 import geojson
 from datetime import timedelta
 from fastapi import (
@@ -583,38 +582,26 @@ async def odm_webhook(
 
 @router.post("/upload-orthophoto", tags=["Orthophotos"])
 async def upload_orthophoto(
+    project_name: str,
     project_id: uuid.UUID,
     task_id: uuid.UUID,
-    # metadata: project_schemas.OrthophotoMetadata,
-    user_data: AuthUser = Depends(login_required),
+    background_tasks: BackgroundTasks,
 ):
     """
-    Uploads an orthophoto to Open Aerial Map with metadata.
+    Triggers the upload of an orthophoto to Open Aerial Map with metadata in the background.
     """
     try:
-        # Read the uploaded file
-        upload_folder = "uploads/"  # Define where to store temporarily
-        os.makedirs(upload_folder, exist_ok=True)  # Ensure the directory exists
-
-        image_path = os.path.join(upload_folder, image.filename)
-
-
-        api_token = settings.OAM_API_TOKEN
-        uploader = OpenAerialMapUploader(api_token=api_token)
-
-        # Generate metadata for the image
-        image_metadata = uploader.create_metadata(
-            image_path,
-            "Title."
+        background_tasks.add_task(
+            project_logic.upload_image_to_oam_in_background,
+            project_name,
+            project_id,
+            task_id,
         )
 
-        # Upload the image with metadata
-        response = uploader.upload_image(image_path, image_metadata)
+        return {"detail": "Image upload process started."}
 
-        if response.status_code == 201:
-            return {"detail": "Image uploaded successfully", "url": response.json()['url']}
-        else:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload orthophoto: {str(e)}")
+        log.error(str(e))
+        raise HTTPException(
+            status_code=500, detail=f"Failed to initiate orthophoto upload: {str(e)}"
+        )
